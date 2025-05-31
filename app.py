@@ -2,6 +2,7 @@ import streamlit as st
 import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime
+import time
 
 # ---- PASSWORD GATE ----
 def password_gate():
@@ -12,14 +13,17 @@ def password_gate():
 password_gate()
 
 # ---- GOOGLE SHEETS SETUP ----
-scope = ["https://www.googleapis.com/auth/spreadsheets"]
-creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
-client = gspread.authorize(creds)
+@st.cache_resource
+def init_google_sheets():
+    """Initialize Google Sheets client - cached to avoid repeated authentication"""
+    scope = ["https://www.googleapis.com/auth/spreadsheets"]
+    creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
+    client = gspread.authorize(creds)
+    return client
 
-# ---- SPREADSHEET SETUP ----
+# Get cached client
+client = init_google_sheets()
 SHEET_ID = st.secrets["sheet_id"]
-wallet_ws = client.open_by_key(SHEET_ID).worksheet("wallets")
-history_ws = client.open_by_key(SHEET_ID).worksheet("history")
 
 # ---- UTILITY FUNCTIONS ----
 def safe_int(x):
@@ -40,7 +44,7 @@ def convert_to_cp(platinum=0, gold=0, silver=0, copper=0):
 
 def convert_from_cp(total_cp):
     """Convert total copper pieces back to currency breakdown"""
-    total_cp = safe_int(total_cp)  # Ensure it's an integer
+    total_cp = safe_int(total_cp)
     return {
         "platinum": total_cp // 1000,
         "gold": (total_cp % 1000) // 100,
@@ -48,19 +52,23 @@ def convert_from_cp(total_cp):
         "copper": total_cp % 10
     }
 
-# ---- DATA FUNCTIONS ----
+# ---- CACHED DATA FUNCTIONS ----
+@st.cache_data(ttl=30)  # Cache for 30 seconds
 def get_wallet_data():
-    """Fetch wallet data from Google Sheets"""
+    """Fetch wallet data from Google Sheets with caching"""
     try:
+        wallet_ws = client.open_by_key(SHEET_ID).worksheet("wallets")
         data = wallet_ws.get_all_records()
         return {row["Character"]: row for row in data}
     except Exception as e:
         st.error(f"Error fetching wallet data: {e}")
         return {}
 
+@st.cache_data(ttl=60)  # Cache history for 1 minute (less frequently updated)
 def get_history():
-    """Fetch transaction history from Google Sheets"""
+    """Fetch transaction history from Google Sheets with caching"""
     try:
+        history_ws = client.open_by_key(SHEET_ID).worksheet("history")
         return history_ws.get_all_records()
     except Exception as e:
         st.error(f"Error fetching history: {e}")
@@ -69,6 +77,9 @@ def get_history():
 def update_wallet(character, change_cp, label):
     """Update character wallet and add transaction to history"""
     try:
+        # Clear cache before updating to get fresh data
+        get_wallet_data.clear()
+        
         data = get_wallet_data()
         if character not in data:
             st.error("Character not found.")
@@ -90,11 +101,16 @@ def update_wallet(character, change_cp, label):
 
         new_bal = convert_from_cp(new_total_cp)
         
-        # Find the row index for this character (1-based indexing + header row)
+        # Get worksheet references
+        wallet_ws = client.open_by_key(SHEET_ID).worksheet("wallets")
+        history_ws = client.open_by_key(SHEET_ID).worksheet("history")
+        
+        # Find the row index for this character
         character_names = [row["Character"] for row in data.values()]
         idx = character_names.index(character) + 2
 
-        # Update wallet in Google Sheets
+        # Batch update: Update wallet and add history in one go if possible
+        # Update wallet
         wallet_ws.update(f"B{idx}:E{idx}", [[
             new_bal["platinum"], 
             new_bal["gold"], 
@@ -114,6 +130,10 @@ def update_wallet(character, change_cp, label):
             new_bal["copper"]
         ])
         
+        # Clear caches after successful update
+        get_wallet_data.clear()
+        get_history.clear()
+        
         return True
         
     except Exception as e:
@@ -123,7 +143,22 @@ def update_wallet(character, change_cp, label):
 # ---- UI ----
 st.title("💰 D&D Party Wallet Tracker")
 
-# Load data
+# Add refresh button and cache status
+col1, col2, col3 = st.columns([2, 1, 1])
+with col1:
+    if st.button("🔄 Refresh Data"):
+        get_wallet_data.clear()
+        get_history.clear()
+        st.rerun()
+
+with col2:
+    st.caption("Data cached for 30s")
+
+with col3:
+    # Show last update time (you could enhance this)
+    st.caption(f"Updated: {datetime.now().strftime('%H:%M:%S')}")
+
+# Load data (now cached)
 data = get_wallet_data()
 
 if not data:
@@ -165,6 +200,9 @@ if character:
         label = st.text_input("Transaction Label", placeholder="e.g., 'Bought sword', 'Found treasure'")
         txn_type = st.radio("Transaction Type", ["Add", "Deduct"])
         
+        # Optional: Add toggle for storing transaction in history
+        # store_in_history = st.checkbox("Save transaction to history", value=True)
+        
         submitted = st.form_submit_button("Submit Transaction")
         
         if submitted:
@@ -177,7 +215,9 @@ if character:
                 change_cp = multiplier * convert_to_cp(platinum, gold, silver, copper)
                 
                 if update_wallet(character, change_cp, label.strip()):
-                    st.success("Transaction successful! Refreshing data...")
+                    st.success("Transaction successful! Data will refresh automatically.")
+                    # Small delay to ensure Google Sheets has processed the update
+                    time.sleep(1)
                     st.rerun()
 
 # ---- PARTY TOTAL ----
@@ -208,25 +248,29 @@ except Exception as e:
 st.markdown("---")
 st.subheader("📜 Recent Transaction History")
 
-history = get_history()
-if history:
-    # Show last 20 transactions in reverse chronological order
-    recent_history = list(reversed(history[-20:]))
-    
-    for row in recent_history:
-        timestamp = row.get('Timestamp', 'Unknown')
-        character_name = row.get('Character', 'Unknown')
-        txn_type = row.get('Type', 'Unknown')
-        txn_label = row.get('Label', 'No label')
+# Add option to toggle history display to save API calls
+if st.checkbox("Show Transaction History", value=True):
+    history = get_history()
+    if history:
+        # Show last 20 transactions in reverse chronological order
+        recent_history = list(reversed(history[-20:]))
         
-        # Create a more readable display
-        pp = row.get('Platinum', 0)
-        gp = row.get('Gold', 0)
-        sp = row.get('Silver', 0)
-        cp = row.get('Copper', 0)
-        
-        st.write(f"**{timestamp}** - {character_name} ({txn_type}): {txn_label}")
-        st.write(f"   → Balance: {pp}pp, {gp}gp, {sp}sp, {cp}cp")
-        st.write("---")
+        for row in recent_history:
+            timestamp = row.get('Timestamp', 'Unknown')
+            character_name = row.get('Character', 'Unknown')
+            txn_type = row.get('Type', 'Unknown')
+            txn_label = row.get('Label', 'No label')
+            
+            # Create a more readable display
+            pp = row.get('Platinum', 0)
+            gp = row.get('Gold', 0)
+            sp = row.get('Silver', 0)
+            cp = row.get('Copper', 0)
+            
+            st.write(f"**{timestamp}** - {character_name} ({txn_type}): {txn_label}")
+            st.write(f"   → Balance: {pp}pp, {gp}gp, {sp}sp, {cp}cp")
+            st.write("---")
+    else:
+        st.info("No transaction history found.")
 else:
-    st.info("No transaction history found.")
+    st.info("Transaction history hidden to reduce API usage. Check the box above to view.")
