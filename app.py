@@ -249,7 +249,7 @@ st.markdown("---")
 st.subheader("📜 Recent Transaction History")
 
 # Add option to toggle history display to save API calls
-if st.checkbox("Show Transaction History", value=True):
+if st.checkbox("Show Transaction History", value=False):
     history = get_history()
     if history:
         # Show last 20 transactions in reverse chronological order
