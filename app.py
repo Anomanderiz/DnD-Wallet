@@ -64,7 +64,18 @@ def update_wallet(character, change_cp, label):
     ])
 
 def convert_to_cp(platinum=0, gold=0, silver=0, copper=0):
-    return platinum * 1000 + gold * 100 + silver * 10 + copper
+    def safe_int(x):
+        try:
+            return int(x)
+        except (ValueError, TypeError):
+            return 0
+    return (
+        safe_int(platinum) * 1000 +
+        safe_int(gold) * 100 +
+        safe_int(silver) * 10 +
+        safe_int(copper)
+    )
+
 
 def convert_from_cp(total_cp):
     return {
