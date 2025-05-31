@@ -37,7 +37,13 @@ def update_wallet(character, change_cp, label):
         return
 
     old = data[character]
-    total_cp = convert_to_cp(old["Platinum"], old["Gold"], old["Silver"], old["Copper"]) + change_cp
+    total_cp = convert_to_cp(
+    int(old["Platinum"]),
+    int(old["Gold"]),
+    int(old["Silver"]),
+    int(old["Copper"])
+) + change_cp
+
     if total_cp < 0:
         st.error("Insufficient funds.")
         return
