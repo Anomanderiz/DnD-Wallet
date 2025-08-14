@@ -212,7 +212,7 @@ if character_name:
                         notification_message = (f"🏦 A Wizard's Vault transaction has been posted to the account of **{character_name}**.\n"
                                                 f"The vault has registered a **{txn_type.lower()}** of `{currency_str}` for the purpose of: *{label.strip()}*.\n"
                                                 f"The new balance is `{final_balance_str}`.\n"
-                                                f"The ledgers are balanced. For now."
+                                                f"The ledgers are balanced. For now.")
                         send_discord_notification(notification_message)
                          # --- END of new code ---
                         time.sleep(0.5) # A brief pause can feel more responsive
