@@ -1,10 +1,10 @@
 import streamlit as st
-import gspread
-from google.oauth2.service_account import Credentials
+from supabase import create_client, Client
 from datetime import datetime
 import time
 
 # ---- PASSWORD GATE ----
+# No changes needed here.
 def password_gate():
     pw = st.text_input("Enter access password", type="password")
     if pw != st.secrets["access_password"]:
@@ -12,20 +12,19 @@ def password_gate():
 
 password_gate()
 
-# ---- GOOGLE SHEETS SETUP ----
+# ---- SUPABASE SETUP ----
 @st.cache_resource
-def init_google_sheets():
-    """Initialize Google Sheets client - cached to avoid repeated authentication"""
-    scope = ["https://www.googleapis.com/auth/spreadsheets"]
-    creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
-    client = gspread.authorize(creds)
-    return client
+def init_supabase_client() -> Client:
+    """Initialize Supabase client - cached to avoid repeated authentication"""
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
+    return create_client(url, key)
 
 # Get cached client
-client = init_google_sheets()
-SHEET_ID = st.secrets["sheet_id"]
+supabase = init_supabase_client()
 
 # ---- UTILITY FUNCTIONS ----
+# These functions are pure Python and require no changes.
 def safe_int(x):
     """Convert value to int safely, returning 0 for invalid values"""
     try:
@@ -52,85 +51,70 @@ def convert_from_cp(total_cp):
         "copper": total_cp % 10
     }
 
-# ---- CACHED DATA FUNCTIONS ----
+# ---- CACHED DATA FUNCTIONS (Refactored for Supabase) ----
 @st.cache_data(ttl=30)  # Cache for 30 seconds
 def get_wallet_data():
-    """Fetch wallet data from Google Sheets with caching"""
+    """Fetch wallet data from Supabase with caching"""
     try:
-        wallet_ws = client.open_by_key(SHEET_ID).worksheet("wallets")
-        data = wallet_ws.get_all_records()
-        return {row["Character"]: row for row in data}
+        response = supabase.table("wallets").select("*").order("character_name").execute()
+        # Transform list of dicts into a dict keyed by character_name for compatibility
+        return {row["character_name"]: row for row in response.data}
     except Exception as e:
         st.error(f"Error fetching wallet data: {e}")
         return {}
 
-@st.cache_data(ttl=60)  # Cache history for 1 minute (less frequently updated)
+@st.cache_data(ttl=60)  # Cache history for 1 minute
 def get_history():
-    """Fetch transaction history from Google Sheets with caching"""
+    """Fetch recent transaction history from Supabase with caching"""
     try:
-        history_ws = client.open_by_key(SHEET_ID).worksheet("history")
-        return history_ws.get_all_records()
+        # Fetch last 20 transactions, joining character name from the 'wallets' table
+        response = supabase.table("transactions").select(
+            "*, wallets(character_name)"
+        ).order("created_at", desc=True).limit(20).execute()
+        return response.data
     except Exception as e:
         st.error(f"Error fetching history: {e}")
         return []
 
-def update_wallet(character, change_cp, label):
-    """Update character wallet and add transaction to history"""
+def update_wallet_supabase(character_wallet, change_cp, label, txn_type):
+    """Update wallet and log transaction in Supabase."""
     try:
-        # Clear cache before updating to get fresh data
-        get_wallet_data.clear()
-        
-        data = get_wallet_data()
-        if character not in data:
-            st.error("Character not found.")
-            return False
-
-        old = data[character]
+        # --- Step 1: Check for sufficient funds ---
         current_cp = convert_to_cp(
-            old["Platinum"],
-            old["Gold"],
-            old["Silver"],
-            old["Copper"]
+            character_wallet["platinum"],
+            character_wallet["gold"],
+            character_wallet["silver"],
+            character_wallet["copper"]
         )
-        
-        new_total_cp = current_cp + change_cp
-
-        if new_total_cp < 0:
-            st.error("Insufficient funds.")
+        if current_cp + change_cp < 0:
+            st.error("Insufficient funds for this transaction.")
             return False
 
-        new_bal = convert_from_cp(new_total_cp)
+        # --- Step 2: Log the immutable transaction event. ---
+        # Deconstruct the change from total copper into constituent coins
+        change_amounts = convert_from_cp(abs(change_cp))
         
-        # Get worksheet references
-        wallet_ws = client.open_by_key(SHEET_ID).worksheet("wallets")
-        history_ws = client.open_by_key(SHEET_ID).worksheet("history")
+        supabase.table("transactions").insert({
+            "character_id": character_wallet['id'], # The Foreign Key
+            "description": label,
+            "platinum_change": change_amounts['platinum'] if txn_type == "Add" else -change_amounts['platinum'],
+            "gold_change": change_amounts['gold'] if txn_type == "Add" else -change_amounts['gold'],
+            "silver_change": change_amounts['silver'] if txn_type == "Add" else -change_amounts['silver'],
+            "copper_change": change_amounts['copper'] if txn_type == "Add" else -change_amounts['copper'],
+        }).execute()
         
-        # Find the row index for this character
-        character_names = [row["Character"] for row in data.values()]
-        idx = character_names.index(character) + 2
+        # --- Step 3: Update the character's wallet summary. ---
+        new_total_cp = current_cp + change_cp
+        new_balance = convert_from_cp(new_total_cp)
 
-        # Batch update: Update wallet and add history in one go if possible
-        # Update wallet
-        wallet_ws.update(f"B{idx}:E{idx}", [[
-            new_bal["platinum"], 
-            new_bal["gold"], 
-            new_bal["silver"], 
-            new_bal["copper"]
-        ]])
+        supabase.table("wallets").update({
+            "platinum": new_balance["platinum"],
+            "gold": new_balance["gold"],
+            "silver": new_balance["silver"],
+            "copper": new_balance["copper"],
+        }).eq("id", character_wallet['id']).execute()
 
-        # Add transaction to history
-        history_ws.append_row([
-            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            character,
-            "Add" if change_cp > 0 else "Deduct",
-            label,
-            new_bal["platinum"],
-            new_bal["gold"],
-            new_bal["silver"],
-            new_bal["copper"]
-        ])
-        
-        # Clear caches after successful update
+        # --- Step 4: Clear caches to force a refresh on the next run ---
         get_wallet_data.clear()
         get_history.clear()
         
@@ -140,137 +124,87 @@ def update_wallet(character, change_cp, label):
         st.error(f"Error updating wallet: {e}")
         return False
 
-# ---- UI ----
-st.title("💰 D&D Party Wallet Tracker")
+# ---- UI (with minor adjustments) ----
+st.title("⚔️ D&D Party Wallet Tracker (Supabase Edition)")
 
-# Add refresh button and cache status
-col1, col2, col3 = st.columns([2, 1, 1])
-with col1:
-    if st.button("🔄 Refresh Data"):
-        get_wallet_data.clear()
-        get_history.clear()
-        st.rerun()
+if st.button("🔄 Refresh Data"):
+    get_wallet_data.clear()
+    get_history.clear()
+    st.rerun()
 
-with col2:
-    st.caption("Data cached for 30s")
-
-with col3:
-    # Show last update time (you could enhance this)
-    st.caption(f"Updated: {datetime.now().strftime('%H:%M:%S')}")
-
-# Load data (now cached)
 data = get_wallet_data()
-
 if not data:
-    st.warning("No character data found. Please check your Google Sheets connection.")
+    st.warning("No character data found. Check your Supabase connection and tables.")
     st.stop()
 
-# Character selection
-character = st.selectbox("Select Character", list(data.keys()))
+character_name = st.selectbox("Select Character", list(data.keys()))
 
-if character:
-    st.subheader(f"{character}'s Wallet")
-    wallet = data[character]
+if character_name:
+    wallet = data[character_name]
+    st.subheader(f"{wallet['character_name']}'s Wallet")
     
-    # Display current wallet
     col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Platinum", wallet['Platinum'])
-    with col2:
-        st.metric("Gold", wallet['Gold'])
-    with col3:
-        st.metric("Silver", wallet['Silver'])
-    with col4:
-        st.metric("Copper", wallet['Copper'])
+    col1.metric("Platinum", wallet['platinum'])
+    col2.metric("Gold", wallet['gold'])
+    col3.metric("Silver", wallet['silver'])
+    col4.metric("Copper", wallet['copper'])
 
-    # Transaction form
     with st.form("txn"):
         st.markdown("### Add / Deduct Currency")
+        c1, c2, c3, c4 = st.columns(4)
+        platinum = c1.number_input("Platinum", min_value=0, step=1, value=0)
+        gold = c2.number_input("Gold", min_value=0, step=1, value=0)
+        silver = c3.number_input("Silver", min_value=0, step=1, value=0)
+        copper = c4.number_input("Copper", min_value=0, step=1, value=0)
         
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            platinum = st.number_input("Platinum", min_value=0, step=1, value=0)
-        with col2:
-            gold = st.number_input("Gold", min_value=0, step=1, value=0)
-        with col3:
-            silver = st.number_input("Silver", min_value=0, step=1, value=0)
-        with col4:
-            copper = st.number_input("Copper", min_value=0, step=1, value=0)
-        
-        label = st.text_input("Transaction Label", placeholder="e.g., 'Bought sword', 'Found treasure'")
+        label = st.text_input("Transaction Label", placeholder="e.g., 'Loot from goblin cave'")
         txn_type = st.radio("Transaction Type", ["Add", "Deduct"])
-        
-        # Optional: Add toggle for storing transaction in history
-        # store_in_history = st.checkbox("Save transaction to history", value=True)
-        
         submitted = st.form_submit_button("Submit Transaction")
         
         if submitted:
             if not label.strip():
                 st.error("Please provide a transaction label.")
-            elif platinum == 0 and gold == 0 and silver == 0 and copper == 0:
-                st.error("Please enter an amount for the transaction.")
             else:
-                multiplier = 1 if txn_type == "Add" else -1
-                change_cp = multiplier * convert_to_cp(platinum, gold, silver, copper)
-                
-                if update_wallet(character, change_cp, label.strip()):
-                    st.success("Transaction successful! Data will refresh automatically.")
-                    # Small delay to ensure Google Sheets has processed the update
-                    time.sleep(1)
-                    st.rerun()
+                change_cp = convert_to_cp(platinum, gold, silver, copper)
+                if change_cp == 0:
+                    st.error("Transaction amount cannot be zero.")
+                else:
+                    multiplier = 1 if txn_type == "Add" else -1
+                    if update_wallet_supabase(wallet, multiplier * change_cp, label.strip(), txn_type):
+                        st.success("Transaction successful!")
+                        time.sleep(0.5) # A brief pause can feel more responsive
+                        st.rerun()
 
 # ---- PARTY TOTAL ----
 st.markdown("---")
-st.subheader("💎 Party Total Wealth")
-
+st.subheader("🏰 Party Total Wealth")
 try:
-    total_cp = sum([
-        convert_to_cp(row["Platinum"], row["Gold"], row["Silver"], row["Copper"])
-        for row in data.values()
-    ])
+    total_cp = sum(convert_to_cp(**{k.lower(): v for k, v in row.items() if k.lower() in ['platinum', 'gold', 'silver', 'copper']}) for row in data.values())
     total = convert_from_cp(total_cp)
     
     col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Platinum", total['platinum'])
-    with col2:
-        st.metric("Gold", total['gold'])
-    with col3:
-        st.metric("Silver", total['silver'])
-    with col4:
-        st.metric("Copper", total['copper'])
-        
+    col1.metric("Platinum", total['platinum'])
+    col2.metric("Gold", total['gold'])
+    col3.metric("Silver", total['silver'])
+    col4.metric("Copper", total['copper'])
 except Exception as e:
     st.error(f"Error calculating party total: {e}")
 
 # ---- TRANSACTION HISTORY ----
 st.markdown("---")
 st.subheader("📜 Recent Transaction History")
-
-# Add option to toggle history display to save API calls
-if st.checkbox("Show Transaction History", value=False):
+if st.checkbox("Show Transaction History", value=True):
     history = get_history()
     if history:
-        # Show last 20 transactions in reverse chronological order
-        recent_history = list(reversed(history[-20:]))
-        
-        for row in recent_history:
-            timestamp = row.get('Timestamp', 'Unknown')
-            character_name = row.get('Character', 'Unknown')
-            txn_type = row.get('Type', 'Unknown')
-            txn_label = row.get('Label', 'No label')
+        for row in history:
+            # The structure of 'row' is now much cleaner
+            char_name = row['wallets']['character_name'] if row.get('wallets') else 'Unknown'
+            change_str = ", ".join([f"{v} {k.split('_')[0]}" for k, v in row.items() if 'change' in k and v != 0])
             
-            # Create a more readable display
-            pp = row.get('Platinum', 0)
-            gp = row.get('Gold', 0)
-            sp = row.get('Silver', 0)
-            cp = row.get('Copper', 0)
+            st.markdown(f"""
+            **{datetime.fromisoformat(row['created_at']).strftime('%Y-%m-%d %H:%M')}** - **{char_name}**: {row['description']}
             
-            st.write(f"**{timestamp}** - {character_name} ({txn_type}): {txn_label}")
-            st.write(f"   → Balance: {pp}pp, {gp}gp, {sp}sp, {cp}cp")
-            st.write("---")
+            *Change: {change_str}*
+            """)
     else:
         st.info("No transaction history found.")
-else:
-    st.info("Transaction history hidden to reduce API usage. Check the box above to view.")
