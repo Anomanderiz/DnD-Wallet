@@ -192,19 +192,19 @@ if character_name:
         label = st.text_input("Transaction Label", placeholder="e.g., 'Loot from goblin cave'")
         txn_type = st.radio("Transaction Type", ["Add", "Deduct"])
         submitted = st.form_submit_button("Submit Transaction")
-        
-        if submitted:
-            if not label.strip():
-                st.error("Please provide a transaction label.")
-            else:
-                change_cp = convert_to_cp(platinum, gold, silver, copper)
-                if change_cp == 0:
-                    st.error("Transaction amount cannot be zero.")
-                else:
-                    multiplier = 1 if txn_type == "Add" else -1
-                    if update_wallet_supabase(wallet, multiplier * change_cp, label.strip(), txn_type):
-                        st.success("Transaction successful!")
-                        time.sleep(0.5) # A brief pause can feel more responsive
+        # The Code
+        final_balance = update_wallet_supabase(wallet, multiplier * change_cp, label.strip(), txn_type)
+            if final_balance:
+                st.success("Transaction successful!")
+
+                currency_str = f"{platinum}p, {gold}g, {silver}s, {copper}c"
+                final_balance_str = f"{final_balance['platinum']}p, {final_balance['gold']}g, {final_balance['silver']}s, {final_balance['copper']}c"
+
+                notification_message = (f"A transaction has been posted to the account of **{character_name}**.\n"
+                                        f"The vault has registered a **{txn_type.lower()}** of `{currency_str}` for the purpose of: *{label.strip()}*.\n"
+                                        f"The new balance is `{final_balance_str}`. The ledgers are balanced.")
+                send_discord_notification(notification_message)
+                        time.sleep(0.5)
                         st.rerun()
 
 # ---- PARTY TOTAL ----
