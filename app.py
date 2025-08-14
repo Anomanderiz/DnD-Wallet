@@ -194,18 +194,17 @@ if character_name:
         submitted = st.form_submit_button("Submit Transaction")
         # The Code
         final_balance = update_wallet_supabase(wallet, multiplier * change_cp, label.strip(), txn_type)
-            if final_balance:
-                st.success("Transaction successful!")
+        if final_balance:
+            st.success("Transaction successful!")
+            currency_str = f"{platinum}p, {gold}g, {silver}s, {copper}c"
+            final_balance_str = f"{final_balance['platinum']}p, {final_balance['gold']}g, {final_balance['silver']}s, {final_balance['copper']}c"
 
-                currency_str = f"{platinum}p, {gold}g, {silver}s, {copper}c"
-                final_balance_str = f"{final_balance['platinum']}p, {final_balance['gold']}g, {final_balance['silver']}s, {final_balance['copper']}c"
-
-                notification_message = (f"A transaction has been posted to the account of **{character_name}**.\n"
-                                        f"The vault has registered a **{txn_type.lower()}** of `{currency_str}` for the purpose of: *{label.strip()}*.\n"
-                                        f"The new balance is `{final_balance_str}`. The ledgers are balanced.")
-                send_discord_notification(notification_message)
-                        time.sleep(0.5)
-                        st.rerun()
+            notification_message = (f"A transaction has been posted to the account of **{character_name}**.\n"
+                                    f"The vault has registered a **{txn_type.lower()}** of `{currency_str}` for the purpose of: *{label.strip()}*.\n"
+                                    f"The new balance is `{final_balance_str}`. The ledgers are balanced.")
+            send_discord_notification(notification_message)
+                    time.sleep(0.5)
+                    st.rerun()
 
 # ---- PARTY TOTAL ----
 st.markdown("---")
