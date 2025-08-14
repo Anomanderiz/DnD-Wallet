@@ -53,25 +53,37 @@ def convert_from_cp(total_cp):
         "copper": total_cp % 10
     }
 def send_discord_notification(message: str):
-    """Sends a message to the Discord channel via webhook."""
+    """
+    Sends a message to the Discord channel via a configured webhook.
+
+    Args:
+        message (str): The text message to send to the Discord channel.
+    """
+    # Retrieve the webhook URL from Streamlit's secrets manager.
+    # Using .get() is safer as it returns None if the key is not found.
     webhook_url = st.secrets.get("DISCORD_WEBHOOK_URL")
+
+    # If the URL isn't configured, do nothing and exit gracefully.
     if not webhook_url:
-        # Silently fail if the webhook URL isn't set
+        print("Discord webhook URL not found in secrets. Skipping notification.")
         return
 
+    # Format the data payload as required by Discord's API.
     data = {"content": message}
-    try:
-        response = requests.post(
-            webhook_url,
-            data=json.dumps(data),
-            headers={"Content-Type": "application/json"}
-        )
-        # Raise an exception if the request was unsuccessful
-        response.raise_for_status()
-    except requests.exceptions.RequestException as e:
-        # You could log this error if you want
-        print(f"Error sending Discord notification: {e}")
 
+    try:
+        # Send the HTTP POST request to the webhook URL.
+        # The `json` parameter automatically handles content type headers.
+        response = requests.post(webhook_url, json=data, timeout=5)
+
+        # Raise an exception if the request returned an error status (e.g., 404, 500).
+        response.raise_for_status()
+
+    except requests.exceptions.RequestException as e:
+        # This will catch any network errors (timeout, DNS, etc.).
+        # The error is printed to the console/logs for debugging.
+        print(f"Error sending Discord notification: {e}")
+        
 # ---- CACHED DATA FUNCTIONS (Refactored for Supabase) ----
 @st.cache_data(ttl=30)  # Cache for 30 seconds
 def get_wallet_data():
@@ -193,6 +205,15 @@ if character_name:
                     multiplier = 1 if txn_type == "Add" else -1
                     if update_wallet_supabase(wallet, multiplier * change_cp, label.strip(), txn_type):
                         st.success("Transaction successful!")
+                        # --- NEW: Call the notification function ---
+                        # Create a more descriptive message for Discord
+                        currency_str = f"{platinum}p, {gold}g, {silver}s, {copper}c"
+                        # The Code
+                        notification_message = (f"🏦 A Wizard's Vault transaction has been posted to the account of **{character_name}**.\n"
+                                                f"The vault has registered a **{txn_type.lower()}** of `{currency_str}` for the purpose of: *{label.strip()}*.\n"
+                                                f"The ledgers are balanced. For now.")
+                        send_discord_notification(notification_message)
+                         # --- END of new code ---
                         time.sleep(0.5) # A brief pause can feel more responsive
                         st.rerun()
 
