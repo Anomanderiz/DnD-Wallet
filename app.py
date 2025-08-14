@@ -2,6 +2,8 @@ import streamlit as st
 from supabase import create_client, Client
 from datetime import datetime
 import time
+import requests
+import json
 
 # ---- PASSWORD GATE ----
 # No changes needed here.
@@ -50,6 +52,25 @@ def convert_from_cp(total_cp):
         "silver": (total_cp % 100) // 10,
         "copper": total_cp % 10
     }
+def send_discord_notification(message: str):
+    """Sends a message to the Discord channel via webhook."""
+    webhook_url = st.secrets.get("DISCORD_WEBHOOK_URL")
+    if not webhook_url:
+        # Silently fail if the webhook URL isn't set
+        return
+
+    data = {"content": message}
+    try:
+        response = requests.post(
+            webhook_url,
+            data=json.dumps(data),
+            headers={"Content-Type": "application/json"}
+        )
+        # Raise an exception if the request was unsuccessful
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        # You could log this error if you want
+        print(f"Error sending Discord notification: {e}")
 
 # ---- CACHED DATA FUNCTIONS (Refactored for Supabase) ----
 @st.cache_data(ttl=30)  # Cache for 30 seconds
