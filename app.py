@@ -125,7 +125,7 @@ def update_wallet_supabase(character_wallet, change_cp, label, txn_type):
         return False
 
 # ---- UI (with minor adjustments) ----
-st.title("⚔️ D&D Party Wallet Tracker (Supabase Edition)")
+st.title("⚔️ D&D Party Wallet Tracker")
 
 if st.button("🔄 Refresh Data"):
     get_wallet_data.clear()
@@ -144,10 +144,10 @@ if character_name:
     st.subheader(f"{wallet['character_name']}'s Wallet")
     
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Platinum", wallet['platinum'])
-    col2.metric("Gold", wallet['gold'])
-    col3.metric("Silver", wallet['silver'])
-    col4.metric("Copper", wallet['copper'])
+    col1.metric("💎Platinum", wallet['platinum'])
+    col2.metric("🪙Gold", wallet['gold'])
+    col3.metric("🩶Silver", wallet['silver'])
+    col4.metric("🥉Copper", wallet['copper'])
 
     with st.form("txn"):
         st.markdown("### Add / Deduct Currency")
