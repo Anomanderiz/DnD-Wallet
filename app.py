@@ -182,29 +182,52 @@ if character_name:
     col4.metric("Copper", wallet['copper'])
 
     with st.form("txn"):
-        st.markdown("### Add / Deduct Currency")
-        c1, c2, c3, c4 = st.columns(4)
-        platinum = c1.number_input("Platinum", min_value=0, step=1, value=0)
-        gold = c2.number_input("Gold", min_value=0, step=1, value=0)
-        silver = c3.number_input("Silver", min_value=0, step=1, value=0)
-        copper = c4.number_input("Copper", min_value=0, step=1, value=0)
-        
-        label = st.text_input("Transaction Label", placeholder="e.g., 'Loot from goblin cave'")
-        txn_type = st.radio("Transaction Type", ["Add", "Deduct"])
-        submitted = st.form_submit_button("Submit Transaction")
-        # The Code
-        final_balance = update_wallet_supabase(wallet, multiplier * change_cp, label.strip(), txn_type)
-        if final_balance:
-            st.success("Transaction successful!")
-            currency_str = f"{platinum}p, {gold}g, {silver}s, {copper}c"
-            final_balance_str = f"{final_balance['platinum']}p, {final_balance['gold']}g, {final_balance['silver']}s, {final_balance['copper']}c"
+    st.markdown("### Add / Deduct Currency")
+    c1, c2, c3, c4 = st.columns(4)
+    platinum = c1.number_input("Platinum", min_value=0, step=1, value=0)
+    gold = c2.number_input("Gold", min_value=0, step=1, value=0)
+    silver = c3.number_input("Silver", min_value=0, step=1, value=0)
+    copper = c4.number_input("Copper", min_value=0, step=1, value=0)
+    
+    label = st.text_input("Transaction Label", placeholder="e.g., 'Loot from goblin cave'")
+    txn_type = st.radio("Transaction Type", ["Add", "Deduct"])
+    submitted = st.form_submit_button("Submit Transaction")
 
-            notification_message = (f"A transaction has been posted to the account of **{character_name}**.\n"
-                                    f"The vault has registered a **{txn_type.lower()}** of `{currency_str}` for the purpose of: *{label.strip()}*.\n"
-                                    f"The new balance is `{final_balance_str}`. The ledgers are balanced.")
-            send_discord_notification(notification_message)
-            time.sleep(0.5)
-            st.rerun()
+    # This 'if' statement is crucial. The logic only runs when the button is pressed.
+    if submitted:
+        # First, perform validation checks
+        if not label.strip():
+            st.error("Please provide a transaction label.")
+        elif platinum == 0 and gold == 0 and silver == 0 and copper == 0:
+            st.error("Please enter an amount for the transaction.")
+        else:
+            # --- MISSING LINES ADDED HERE ---
+            # Define the multiplier based on the radio button
+            multiplier = 1 if txn_type == "Add" else -1
+
+            # Use the multiplier to calculate the change in copper pieces
+            change_cp = multiplier * convert_to_cp(platinum, gold, silver, copper)
+            # --- END OF MISSING LINES ---
+            
+            # Now, call the update function with the correctly calculated change_cp
+            final_balance = update_wallet_supabase(wallet, change_cp, label.strip(), txn_type)
+            
+            # This 'if' checks if the update was successful
+            if final_balance:
+                st.success("Transaction successful!")
+
+                currency_str = f"{platinum}p, {gold}g, {silver}s, {copper}c"
+                final_balance_str = f"{final_balance['platinum']}p, {final_balance['gold']}g, {final_balance['silver']}s, {final_balance['copper']}c"
+
+                notification_message = (
+                    f"🏦 A Wizard's Vault transaction has been posted to the account of **{character_name}**.\n"
+                    f"The vault has registered a **{txn_type.lower()}** of `{currency_str}` for the purpose of: *{label.strip()}*.\n"
+                    f"The new balance is `{final_balance_str}`. The ledgers are balanced."
+                )
+                send_discord_notification(notification_message)
+                
+                time.sleep(0.5)
+                st.rerun()
 
 # ---- PARTY TOTAL ----
 st.markdown("---")
