@@ -144,10 +144,10 @@ if character_name:
     st.subheader(f"{wallet['character_name']}'s Wallet")
     
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("💎Platinum", wallet['platinum'])
-    col2.metric("🪙Gold", wallet['gold'])
-    col3.metric("🩶Silver", wallet['silver'])
-    col4.metric("🥉Copper", wallet['copper'])
+    col1.metric("Platinum", wallet['platinum'])
+    col2.metric("Gold", wallet['gold'])
+    col3.metric("Silver", wallet['silver'])
+    col4.metric("Copper", wallet['copper'])
 
     with st.form("txn"):
         st.markdown("### Add / Deduct Currency")
