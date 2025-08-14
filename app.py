@@ -203,8 +203,8 @@ if character_name:
                                     f"The vault has registered a **{txn_type.lower()}** of `{currency_str}` for the purpose of: *{label.strip()}*.\n"
                                     f"The new balance is `{final_balance_str}`. The ledgers are balanced.")
             send_discord_notification(notification_message)
-                    time.sleep(0.5)
-                    st.rerun()
+            time.sleep(0.5)
+            st.rerun()
 
 # ---- PARTY TOTAL ----
 st.markdown("---")
