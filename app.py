@@ -121,7 +121,7 @@ def update_wallet_supabase(character_wallet, change_cp, label, txn_type):
         )
         if current_cp + change_cp < 0:
             st.error("Insufficient funds for this transaction.")
-            return False
+            return None # MODIFIED: Return None on failure
 
         # --- Step 2: Log the immutable transaction event. ---
         # Deconstruct the change from total copper into constituent coins
@@ -147,15 +147,14 @@ def update_wallet_supabase(character_wallet, change_cp, label, txn_type):
             "copper": new_balance["copper"],
         }).eq("id", character_wallet['id']).execute()
 
-        # --- Step 4: Clear caches to force a refresh on the next run ---
         get_wallet_data.clear()
         get_history.clear()
         
-        return True
+        return new_balance # MODIFIED: Return the new_balance dictionary on success
         
     except Exception as e:
         st.error(f"Error updating wallet: {e}")
-        return False
+        return None # MODIFIED: Return None on failure
 
 # ---- UI (with minor adjustments) ----
 st.title("⚔️ D&D Party Wallet Tracker")
@@ -205,16 +204,6 @@ if character_name:
                     multiplier = 1 if txn_type == "Add" else -1
                     if update_wallet_supabase(wallet, multiplier * change_cp, label.strip(), txn_type):
                         st.success("Transaction successful!")
-                        # --- NEW: Call the notification function ---
-                        # Create a more descriptive message for Discord
-                        currency_str = f"{platinum}p, {gold}g, {silver}s, {copper}c"
-                        # The Code
-                        notification_message = (f"🏦 A Wizard's Vault transaction has been posted to the account of **{character_name}**.\n"
-                                                f"The vault has registered a **{txn_type.lower()}** of `{currency_str}` for the purpose of: *{label.strip()}*.\n"
-                                                f"The new balance is `{final_balance_str}`.\n"
-                                                f"The ledgers are balanced. For now.")
-                        send_discord_notification(notification_message)
-                         # --- END of new code ---
                         time.sleep(0.5) # A brief pause can feel more responsive
                         st.rerun()
 
